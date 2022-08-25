@@ -3,11 +3,13 @@ namespace Tests;
 [TestClass]
 public class MainTests
 {
-    RenderOptions inline = new RenderOptions { Mode = RenderMode.InlineOnly };
+    RenderOptions inline = new RenderOptions { Mode = RenderMode.Inline };
 
-    RenderOptions expanded = new RenderOptions { Mode = RenderMode.ExpandedOnly };
+    RenderOptions expanded = new RenderOptions { Mode = RenderMode.Expanded };
 
     HierarchyStringBranchInfo tuples = new HierarchyStringBranchInfo("(", ")", ",");
+
+
 
     [TestMethod]
     public void TestBasics()
@@ -39,20 +41,40 @@ public class MainTests
     }
 
     [TestMethod]
-    public void TestCollapse()
+    public void TestExpand()
     {
-        var shortLine = new RenderOptions { MaxLineLength = 16 };
+        var shortLine = new RenderOptions { MaxLineLength = 20 };
 
-        var source = Create(tuples, Create(tuples, "one", "two"), Create(tuples, "three", "pio"), "done");
+        HierarchyString Make(Int32 stringLength)
+        {
+            return Create(tuples, "a", new String('x', stringLength), "b");
+        }
 
-        TestRender(@"(
-  ( one, two ),
-  (
-    three,
-    pio
-  ),
-  done
-)", source, shortLine);
+        var inlineMinLength = @"( a, x, b )".Length - 1;
+
+        TestRender(@"( a, x, b )", Make(1), shortLine);
+
+        for (var i = 4; i < 25; ++i)
+        {
+            // i is the line length we're aiming for, but it can get longer even if expanded
+
+            var symbolLength = i - shortLine.Indentation.Length - tuples.separator.Length;
+
+            var source = Make(symbolLength);
+
+            var actual = source.RenderToString(shortLine);
+
+            var lines = actual.Split(new [] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
+
+            var longestLine = lines.OrderByDescending(s => s.Length).FirstOrDefault();
+
+            var maxLength = longestLine!.Length;
+
+            // if inline, the max line length should be inlineMinLength + symbolLength
+            // if expanded, the max line length should be i and only then it may be greater than shortLine.MaxLineLength
+
+            Assert.IsTrue(maxLength == i || maxLength == inlineMinLength + symbolLength, $"Longest line is {maxLength} (not {i} or {inlineMinLength + i}) characters long:\n\n<{longestLine}>");
+        }
     }
 
     void TestRender(String expected, HierarchyString source, RenderOptions options = null)

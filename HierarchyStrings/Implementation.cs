@@ -5,16 +5,15 @@ using System;
 
 public enum RenderMode
 {
-    Default,
-    InlineOnly,
-    ExpandedOnly
+    Inline,
+    Expanded
 }
 
 public class RenderOptions
 {
     internal static readonly RenderOptions Default = new RenderOptions();
 
-    public RenderMode Mode { get; set; }
+    public RenderMode? Mode { get; set; }
 
     public Int32 MaxLineLength { get; set; } = 74;
 
@@ -135,7 +134,8 @@ public class HierarchyStringRenderer : HierarchyStringVisitor
 
     Boolean isSpacePending = false;
     Boolean isLineTouched = true;
-    Boolean areWritingInline = false;
+    RenderMode? setMode;
+    RenderMode haveMode = RenderMode.Inline;
 
     HierarchyStringLengthMeasurerer measurer;
 
@@ -145,17 +145,31 @@ public class HierarchyStringRenderer : HierarchyStringVisitor
         {
             writer = writer,
             options = options ?? RenderOptions.Default,
-            areWritingInline = options.Mode == RenderMode.InlineOnly,
-            measurer = new HierarchyStringLengthMeasurerer()
+            measurer = new HierarchyStringLengthMeasurerer(),
+            setMode = options.Mode
         }
         .Visit(gs);
     }
 
     public override void Visit(HierarchyString text)
     {
-        measurer.IsTooLong(text, options.MaxLineLength);
+        var isTooLong = measurer.IsTooLong(text, options.MaxLineLength - options.Indentation.Length * depth);
 
-        base.Visit(text);
+        var hadMode = haveMode;
+
+        if (isTooLong)
+        {
+            haveMode = setMode ?? RenderMode.Expanded;
+        }
+
+        try
+        {
+            base.Visit(text);
+        }
+        finally
+        {
+            haveMode = hadMode;
+        }
     }
 
     protected override void Visit(string s)
@@ -189,7 +203,7 @@ public class HierarchyStringRenderer : HierarchyStringVisitor
                 WriteToken(branch.separator, isSeparator: true);
             }
 
-            if (!areWritingInline)
+            if (haveMode == RenderMode.Expanded)
             {
                 WriteLine();
             }
@@ -202,11 +216,6 @@ public class HierarchyStringRenderer : HierarchyStringVisitor
         WriteToken(branch.tail);
     }
 
-    void WriteSeparator(String separator)
-    {
-        writer.Write(separator);
-    }
-
     void WriteToken(String token, Boolean isSeparation = false, Boolean isSeparator = false)
     {
         EnsureIndentation();
@@ -216,7 +225,7 @@ public class HierarchyStringRenderer : HierarchyStringVisitor
             writer.Write(' ');
         }
 
-        if (isSeparation && !areWritingInline)
+        if (isSeparation && haveMode == RenderMode.Expanded)
         {
             writer.WriteLine(token);
 
