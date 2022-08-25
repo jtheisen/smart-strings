@@ -3,13 +3,30 @@ using System.IO;
 using System.Linq;
 using System;
 
+public enum RenderMode
+{
+    Default,
+    InlineOnly,
+    ExpandedOnly
+}
+
+public class RenderOptions
+{
+    internal static readonly RenderOptions Default = new RenderOptions();
+
+    public RenderMode Mode { get; set; }
+
+    public Int32 MaxLineLength { get; set; } = 74;
+
+    public String Indentation { get; set; } = "  ";
+}
 
 public static class HierarchyStringExtensions
 {
-    public static String RenderToString(this HierarchyString source, String indentation = ".")
+    public static String RenderToString(this HierarchyString source, RenderOptions options = null)
     {
         var writer = new StringWriter();
-        HierarchyStringRenderer.Render(source, writer, indentation);
+        HierarchyStringRenderer.Render(source, writer, options);
         return writer.ToString();
     }
 }
@@ -18,46 +35,44 @@ public struct HierarchyString
 {
     internal Object impl;
 
-    public HierarchyString(String s)
-    {
-        impl = s;
-    }
-
-    public HierarchyString(HierarchyStringImplementation g)
-    {
-        impl = g;
-    }
-
-    public HierarchyString(IEnumerable<String> nested, String head = null, String tail = null, String separator = null, Boolean separatorIsTerminator = false)
-    {
-        impl = new HierarchyStringImplementation(nested.Select(s => new HierarchyString(s)).ToArray(), head, tail, separator, separatorIsTerminator);
-    }
-
-    public HierarchyString(IEnumerable<HierarchyString> nested, String head = null, String tail = null, String separator = null, Boolean separatorIsTerminator = false)
-    {
-        impl = new HierarchyStringImplementation(nested.ToArray(), head, tail, separator, separatorIsTerminator);
-    }
-
     public override string ToString() => this.RenderToString();
 
-    public static implicit operator HierarchyString(String s)
-        => new HierarchyString(s);
+    public static implicit operator HierarchyString(String s) => new HierarchyString { impl = s };
 
-    public static HierarchyString operator +(HierarchyString lhs, HierarchyString rhs)
-        => new HierarchyString(new HierarchyStringImplementation(lhs, rhs));
+    public static implicit operator HierarchyString(HierarchyStringBranch b) => new HierarchyString { impl = b };
+}
+
+public static class HierarchyStringCreation
+{
+    public static HierarchyString Create(HierarchyStringBranchInfo branchInfo, params HierarchyString[] children)
+    {
+        return new HierarchyStringBranch(children, branchInfo);
+    }
+
+    public static HierarchyString Create(IEnumerable<String> nested, String head = null, String tail = null, String separator = null, Boolean separatorIsTerminator = false)
+    {
+        return new HierarchyStringBranch(nested.Select(s => (HierarchyString)s).ToArray(), new HierarchyStringBranchInfo(head, tail, separator, separatorIsTerminator));
+    }
+
+    public static HierarchyString Create(IEnumerable<HierarchyString> nested, String head = null, String tail = null, String separator = null, Boolean separatorIsTerminator = false)
+    {
+        var childArray = nested as HierarchyString[] ?? nested.ToArray();
+
+        return new HierarchyStringBranch(childArray, new HierarchyStringBranchInfo(head, tail, separator, separatorIsTerminator));
+    }
 }
 
 public class HierarchyStringVisitor
 {
-    public void Visit(HierarchyString text)
+    public virtual void Visit(HierarchyString text)
     {
         if (text.impl is String s)
         {
             Visit(s);
         }
-        else if (text.impl is HierarchyStringImplementation g)
+        else if (text.impl is HierarchyStringBranch b)
         {
-            Visit(g);
+            Visit(ref b.info, b.children);
         }
         else if (text.impl != null)
         {
@@ -66,22 +81,81 @@ public class HierarchyStringVisitor
     }
 
     protected virtual void Visit(String s) { }
-    protected virtual void Visit(HierarchyStringImplementation g) { }
+    protected virtual void Visit(ref HierarchyStringBranchInfo branchInfo, HierarchyString[] children) { }
+}
+
+public class HierarchyStringLengthMeasurerer : HierarchyStringVisitor
+{
+    Int32 max;
+    Int32 length;
+
+    public Boolean IsTooLong(HierarchyString source, Int32 max)
+    {
+        Reset(max);
+        Visit(source);
+        return length >= max;
+    }
+
+    public void Reset(Int32 max)
+    {
+        this.max = max;
+        this.length = 0;
+    }
+
+    protected override void Visit(string s) => Record(s);
+
+    protected override void Visit(ref HierarchyStringBranchInfo branchInfo, HierarchyString[] children)
+    {
+        Record(branchInfo.head);
+
+        Record(branchInfo.separator, children.Length - (branchInfo.separatorIsTerminator ? 0 : 1));
+
+        foreach (var child in children)
+        {
+            if (length >= max) break;
+
+            Visit(child);
+        }
+    }
+
+    void Record(String s, Int32 times = 1)
+    {
+        if (s != null)
+        {
+            length += times * (s.Length + 1);
+        }
+    }
 }
 
 public class HierarchyStringRenderer : HierarchyStringVisitor
 {
     Int32 depth;
     TextWriter writer;
-    String identation = "  ";
+    RenderOptions options;
 
     Boolean isSpacePending = false;
     Boolean isLineTouched = true;
     Boolean areWritingInline = false;
 
-    public static void Render(HierarchyString gs, TextWriter writer, String identation)
+    HierarchyStringLengthMeasurerer measurer;
+
+    public static void Render(HierarchyString gs, TextWriter writer, RenderOptions options)
     {
-        new HierarchyStringRenderer { writer = writer, identation = identation }.Visit(gs);
+        new HierarchyStringRenderer
+        {
+            writer = writer,
+            options = options ?? RenderOptions.Default,
+            areWritingInline = options.Mode == RenderMode.InlineOnly,
+            measurer = new HierarchyStringLengthMeasurerer()
+        }
+        .Visit(gs);
+    }
+
+    public override void Visit(HierarchyString text)
+    {
+        measurer.IsTooLong(text, options.MaxLineLength);
+
+        base.Visit(text);
     }
 
     protected override void Visit(string s)
@@ -89,20 +163,20 @@ public class HierarchyStringRenderer : HierarchyStringVisitor
         WriteToken(s);
     }
 
-    protected override void Visit(HierarchyStringImplementation g)
+    protected override void Visit(ref HierarchyStringBranchInfo branch, HierarchyString[] children)
     {
-        WriteToken(g.head, true);
+        WriteToken(branch.head, true);
 
         ++depth;
 
         try
         {
             var hadFirst = false;
-            foreach (var i in g.children)
+            foreach (var i in children)
             {
                 if (hadFirst)
                 {
-                    WriteToken(g.separator, true, isSeparator: true);
+                    WriteToken(branch.separator, true, isSeparator: true);
                 }
 
                 Visit(i);
@@ -110,9 +184,9 @@ public class HierarchyStringRenderer : HierarchyStringVisitor
                 hadFirst = true;
             }
 
-            if (g.separatorIsTerminator)
+            if (branch.separatorIsTerminator)
             {
-                WriteToken(g.separator, isSeparator: true);
+                WriteToken(branch.separator, isSeparator: true);
             }
 
             if (!areWritingInline)
@@ -125,7 +199,7 @@ public class HierarchyStringRenderer : HierarchyStringVisitor
             --depth;
         }
 
-        WriteToken(g.tail);
+        WriteToken(branch.tail);
     }
 
     void WriteSeparator(String separator)
@@ -172,37 +246,35 @@ public class HierarchyStringRenderer : HierarchyStringVisitor
 
         for (var i = 0; i < depth; ++i)
         {
-            writer.Write(identation);
+            writer.Write(options.Indentation);
         }
 
         isLineTouched = true;
     }
 }
 
-
-public class HierarchyStringImplementation
+public struct HierarchyStringBranchInfo
 {
-    internal String head, separator, tail;
-    internal Boolean separatorIsTerminator;
-    internal HierarchyString[] children;
+    public String head, tail, separator;
+    public Boolean separatorIsTerminator;
 
-    public HierarchyStringImplementation(params HierarchyString[] nested)
+    public HierarchyStringBranchInfo(String head = null, String tail = null, String separator = null, Boolean separatorIsTerminator = false)
     {
-        this.children = nested;
-    }
-
-    public HierarchyStringImplementation(HierarchyString[] nested, String head = null, String tail = null, String separator = null, Boolean separatorIsTerminator = false)
-    {
-        this.children = nested;
         this.head = head;
         this.tail = tail;
         this.separator = separator;
         this.separatorIsTerminator = separatorIsTerminator;
     }
+}
 
-    static HierarchyStringImplementation Create(params HierarchyString[] nested)
-        => new HierarchyStringImplementation(nested);
+public class HierarchyStringBranch
+{
+    internal HierarchyStringBranchInfo info;
+    internal HierarchyString[] children;
 
-    public override string ToString()
-        => String.Join("", children.Select(g => g.ToString()));
+    public HierarchyStringBranch(HierarchyString[] nested, HierarchyStringBranchInfo info)
+    {
+        this.children = nested;
+        this.info = info;
+    }
 }
