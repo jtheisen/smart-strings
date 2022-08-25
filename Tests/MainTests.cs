@@ -6,11 +6,11 @@ public class MainTests
     [TestMethod]
     public void TestMethod1()
     {
-        var sample = new GroupedString(
+        var sample = new HierarchyString(
             new[]
             {
             "foo",
-            new GroupedString(new [] { "i1", "i2" }, "{", "}", ","),
+            new HierarchyString(new [] { "i1", "i2" }, "{", "}", ","),
             "bar"
             },
             "[",

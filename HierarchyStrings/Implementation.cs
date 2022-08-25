@@ -4,58 +4,58 @@ using System.Linq;
 using System;
 
 
-public static class GroupedStringExtensions
+public static class HierarchyStringExtensions
 {
-    public static String RenderToString(this GroupedString source, String indentation = ".")
+    public static String RenderToString(this HierarchyString source, String indentation = ".")
     {
         var writer = new StringWriter();
-        GroupedStringRenderer.Render(source, writer, indentation);
+        HierarchyStringRenderer.Render(source, writer, indentation);
         return writer.ToString();
     }
 }
 
-public struct GroupedString
+public struct HierarchyString
 {
     internal Object impl;
 
-    public GroupedString(String s)
+    public HierarchyString(String s)
     {
         impl = s;
     }
 
-    public GroupedString(StringGroup g)
+    public HierarchyString(HierarchyStringImplementation g)
     {
         impl = g;
     }
 
-    public GroupedString(IEnumerable<String> nested, String head = null, String tail = null, String separator = null, Boolean separatorIsTerminator = false)
+    public HierarchyString(IEnumerable<String> nested, String head = null, String tail = null, String separator = null, Boolean separatorIsTerminator = false)
     {
-        impl = new StringGroup(nested.Select(s => new GroupedString(s)).ToArray(), head, tail, separator, separatorIsTerminator);
+        impl = new HierarchyStringImplementation(nested.Select(s => new HierarchyString(s)).ToArray(), head, tail, separator, separatorIsTerminator);
     }
 
-    public GroupedString(IEnumerable<GroupedString> nested, String head = null, String tail = null, String separator = null, Boolean separatorIsTerminator = false)
+    public HierarchyString(IEnumerable<HierarchyString> nested, String head = null, String tail = null, String separator = null, Boolean separatorIsTerminator = false)
     {
-        impl = new StringGroup(nested.ToArray(), head, tail, separator, separatorIsTerminator);
+        impl = new HierarchyStringImplementation(nested.ToArray(), head, tail, separator, separatorIsTerminator);
     }
 
     public override string ToString() => this.RenderToString();
 
-    public static implicit operator GroupedString(String s)
-        => new GroupedString(s);
+    public static implicit operator HierarchyString(String s)
+        => new HierarchyString(s);
 
-    public static GroupedString operator +(GroupedString lhs, GroupedString rhs)
-        => new GroupedString(new StringGroup(lhs, rhs));
+    public static HierarchyString operator +(HierarchyString lhs, HierarchyString rhs)
+        => new HierarchyString(new HierarchyStringImplementation(lhs, rhs));
 }
 
-public class GroupedStringVisitor
+public class HierarchyStringVisitor
 {
-    public void Visit(GroupedString text)
+    public void Visit(HierarchyString text)
     {
         if (text.impl is String s)
         {
             Visit(s);
         }
-        else if (text.impl is StringGroup g)
+        else if (text.impl is HierarchyStringImplementation g)
         {
             Visit(g);
         }
@@ -66,10 +66,10 @@ public class GroupedStringVisitor
     }
 
     protected virtual void Visit(String s) { }
-    protected virtual void Visit(StringGroup g) { }
+    protected virtual void Visit(HierarchyStringImplementation g) { }
 }
 
-public class GroupedStringRenderer : GroupedStringVisitor
+public class HierarchyStringRenderer : HierarchyStringVisitor
 {
     Int32 depth;
     TextWriter writer;
@@ -79,9 +79,9 @@ public class GroupedStringRenderer : GroupedStringVisitor
     Boolean isLineTouched = true;
     Boolean areWritingInline = false;
 
-    public static void Render(GroupedString gs, TextWriter writer, String identation)
+    public static void Render(HierarchyString gs, TextWriter writer, String identation)
     {
-        new GroupedStringRenderer { writer = writer, identation = identation }.Visit(gs);
+        new HierarchyStringRenderer { writer = writer, identation = identation }.Visit(gs);
     }
 
     protected override void Visit(string s)
@@ -89,7 +89,7 @@ public class GroupedStringRenderer : GroupedStringVisitor
         WriteToken(s);
     }
 
-    protected override void Visit(StringGroup g)
+    protected override void Visit(HierarchyStringImplementation g)
     {
         WriteToken(g.head, true);
 
@@ -180,18 +180,18 @@ public class GroupedStringRenderer : GroupedStringVisitor
 }
 
 
-public class StringGroup
+public class HierarchyStringImplementation
 {
     internal String head, separator, tail;
     internal Boolean separatorIsTerminator;
-    internal GroupedString[] children;
+    internal HierarchyString[] children;
 
-    public StringGroup(params GroupedString[] nested)
+    public HierarchyStringImplementation(params HierarchyString[] nested)
     {
         this.children = nested;
     }
 
-    public StringGroup(GroupedString[] nested, String head = null, String tail = null, String separator = null, Boolean separatorIsTerminator = false)
+    public HierarchyStringImplementation(HierarchyString[] nested, String head = null, String tail = null, String separator = null, Boolean separatorIsTerminator = false)
     {
         this.children = nested;
         this.head = head;
@@ -200,8 +200,8 @@ public class StringGroup
         this.separatorIsTerminator = separatorIsTerminator;
     }
 
-    static StringGroup Create(params GroupedString[] nested)
-        => new StringGroup(nested);
+    static HierarchyStringImplementation Create(params HierarchyString[] nested)
+        => new HierarchyStringImplementation(nested);
 
     public override string ToString()
         => String.Join("", children.Select(g => g.ToString()));
